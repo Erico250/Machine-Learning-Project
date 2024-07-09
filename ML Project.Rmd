@@ -1,0 +1,718 @@
+---
+title: "ML613"
+author: "Eric"
+date: "`r Sys.Date()`"
+output:
+  word_document: default
+  pdf_document: default
+---
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(corrplot)
+library(caret)
+library(e1071)
+library(randomForest)
+library(nnet)
+library(DALEX)
+library(pROC)
+library(rpart)
+library(mlbench)
+library(glmnet)
+library(caret)
+library(mlbench)
+library(caret)
+library(mlbench)
+library(foreach)
+library(randomForest)
+library(class)
+library(xgboost)
+library(caretEnsemble)
+```
+
+```{r}
+heart_data<- read.csv("D:/desktop/SURV/SECONDSEMESTER23-24/613/heart_data.csv")
+```
+
+
+
+Variable Description
+```{r}
+data_dictionary <- data.frame(
+  VariableName = c("age", "sex", "chest_pain_type", "resting_blood_pressure", "cholesterol",
+                   "fasting_blood_sugar", "resting_electrocardiogram", "max_heart_rate_achieved",
+                   "exercise_induced_angina", "st_depression", "st_slope", "num_major_vessels",
+                   "thalassemia", "target"),
+  DataType = c("Integer", "Categorical", "Categorical", "Integer", "Integer",
+               "Categorical", "Categorical", "Integer",
+               "Categorical", "Float", "Categorical", "Integer",
+               "Categorical", "Categorical"),
+  Description = c("Age of the patient in years.",
+                  "Patient's sex: 0 = Female, 1 = Male.",
+                  "Type of chest pain experienced by the patient: 1 = Typical angina, 2 = Atypical angina, 3 = Non-anginal pain, 4 = Asymptomatic.",
+                  "Resting blood pressure (in mm Hg on admission to the hospital).",
+                  "Serum cholesterol in mg/dl.",
+                  "Fasting blood sugar > 120 mg/dl: 0 = No, 1 = Yes.",
+                  "Resting electrocardiographic results: 0 = Normal, 1 = ST-T wave abnormality, 2 = Left ventricular hypertrophy.",
+                  "Maximum heart rate achieved during the stress test.",
+                  "Exercise-induced chest pain: 0 = No, 1 = Yes.",
+                  "ST depression induced by exercise relative to rest.",
+                  "The slope of the peak exercise ST segment: 1 = Upsloping, 2 = Flat, 3 = Downsloping.",
+                  "Number of major vessels (0-4) colored by fluoroscopy.",
+                  "Thalassemia: 1 = Normal, 2 = Fixed defect, 3 = Reversible defect.",
+                  "Presence of heart disease: 0 = Absence, 1 = Presence.")
+)
+
+library(knitr)
+kable(data_dictionary, format = "markdown", col.names = c("Variable Name", "Data Type", "Description"))
+```
+
+
+
+Data minpulation
+```{r}
+# Load the data (assuming it's already loaded as heart_data)
+
+# Convert columns to factors in R
+heart_data$sex <- as.factor(heart_data$sex)
+heart_data$cp <- as.factor(heart_data$cp)
+heart_data$fbs <- as.factor(heart_data$fbs)
+heart_data$restecg <- as.factor(heart_data$restecg)
+heart_data$exang <- as.factor(heart_data$exang)
+heart_data$slope <- as.factor(heart_data$slope)
+#heart_data$ca <- as.factor(heart_data$ca)
+heart_data$thal <- as.factor(heart_data$thal)
+heart_data$target <- as.factor(heart_data$target)
+heart_data <- subset(heart_data, thal != "0")
+heart_data$thal <- factor(heart_data$thal)
+# Check the structure of the data frame to confirm changes
+heart_data <- na.omit(heart_data)
+str(heart_data)
+
+```
+
+```{r warning=TRUE}
+names(heart_data) <- c('Age', 'Sex', 'Chest_Pain_Type', 'Resting_BP', 'Cholesterol',
+                       'Fasting_Blood_Sugar', 'Resting_ECG', 'Max_Heart_Rate', 'Exercise_Induced_Angina',
+                       'ST_Depression', 'ST_Slope', 'Num_Major_Vessels', 'Thalassemia', 'Target')
+
+```
+
+```{r}
+# Histogram for 'Resting BP'
+hist(heart_data$Resting_BP, main="Histogram of Resting Blood Pressure", xlab="Resting BP (mm Hg)")
+
+# Histogram for 'Cholesterol'
+hist(heart_data$Cholesterol, main="Histogram of Serum Cholesterol", xlab="Serum Cholesterol (mg/dl)")
+
+# Histogram for 'Max Heart Rate'
+hist(heart_data$Max_Heart_Rate, main="Histogram of Maximum Heart Rate", xlab="Max Heart Rate (bpm)")
+
+# Histogram for 'ST Depression'
+hist(heart_data$ST_Depression, main="Histogram of ST Depression", xlab="ST Depression")
+
+```
+
+
+
+
+
+```{r}
+# Scatter plot for 'Max Heart Rate' vs. 'Age' colored by 'Target'
+plot(heart_data$Age, heart_data$Max_Heart_Rate, 
+     main="Scatter Plot of Max Heart Rate vs. Age", 
+     xlab="Age", ylab="Max Heart Rate", 
+     pch=19, col=ifelse(heart_data$Target == 1, "red", "grey"))
+legend("topright", legend=c("Disease", "No Disease"), col=c("red", "grey"), pch=19)
+
+# Scatter plot for 'ST Depression' vs. 'Age' colored by 'Target'
+plot(heart_data$Age, heart_data$ST_Depression, 
+     main="Scatter Plot of ST Depression vs. Age", 
+     xlab="Age", ylab="ST Depression", 
+     pch=19, col=ifelse(heart_data$Target == 1, "red", "grey"))
+legend("topright", legend=c("Disease", "No Disease"), col=c("red", "grey"), pch=19)
+
+```
+
+
+
+Data Partitioning
+
+```{r}
+
+set.seed(9453)
+inTrain <- createDataPartition(heart_data$Target, 
+                               p = .8, 
+                               list = FALSE, 
+                               times = 1)
+
+heart_train <- heart_data[inTrain,]
+heart_test <- heart_data[-inTrain,]
+```
+
+Logistic Regression model 
+
+```{r}
+log_model<- glm(Target~., data = heart_data, family = "binomial")
+summary(log_model)
+```
+
+
+
+```{r}
+library(pROC)
+predicted_risk_scores<- predict(log_model, newdata= heart_test, type="response")
+roc_logit <- roc(response = heart_test$Target, predictor = predicted_risk_scores)
+#predicted_risk_scores2<- predict(logit_model2, newdata= heart_test, type="response")
+auc(roc_logit)
+plot(roc_logit, col = "red")
+```
+
+
+
+```{r}
+library(caret)
+
+# Convert predicted probabilities to a binary factor based on a 0.5 threshold
+predicted_classes <- ifelse(predicted_risk_scores > 0.5, "1", "0")
+predicted_classes <- factor(predicted_classes, levels = c("0", "1"))
+
+# Ensure the actual target variable is a factor with the same levels
+actual_classes <- factor(heart_test$Target, levels = c("0", "1"))
+
+# Create a confusion matrix
+cm <- confusionMatrix(predicted_classes, actual_classes)
+
+# Extract the metrics
+accuracy <- cm$overall['Accuracy']
+precision <- cm$byClass['Pos Pred Value']
+recall <- cm$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+print(paste("Accuracy:", accuracy))
+print(paste("Precision:", precision))
+print(paste("Recall:", recall))
+print(paste("F1 Score:", F1))
+
+```
+
+
+Lasso
+```{r}
+# Load the necessary libraries
+library(caret)
+
+x <- model.matrix(Target ~ . - 1, data = heart_data)
+
+y <- as.numeric(heart_data$Target) - 1
+
+
+```
+
+
+```{r}
+set.seed(123) # For reproducibility
+
+cv_lasso <- cv.glmnet(x, y, family = "binomial", alpha = 1)
+
+best_lambda <- cv_lasso$lambda.min
+
+lasso_model <- glmnet(x, y, family = "binomial", alpha = 1, lambda = best_lambda)
+
+```
+
+
+```{r}
+print(coef(lasso_model, s = best_lambda))
+```
+
+
+```{r}
+# Load necessary libraries
+library(glmnet)
+library(caret)
+library(pROC)
+
+test_x <- model.matrix(~ . - 1, data = heart_test[, -which(names(heart_test) == "Target")])
+
+predicted_probabilities <- predict(lasso_model, newx = test_x, s = "lambda.min", type = "response")
+
+predicted_classes <- ifelse(predicted_probabilities > 0.5, "1", "0")
+predicted_classes <- factor(predicted_classes, levels = c("0", "1"))
+
+actual_classes <- factor(heart_test$Target, levels = c("0", "1"))
+
+conf_matrix <- confusionMatrix(predicted_classes, actual_classes)
+accuracy <- conf_matrix$overall['Accuracy']
+precision <- conf_matrix$byClass['Pos Pred Value']
+recall <- conf_matrix$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+```
+
+
+
+
+```{r}
+# Calculate and plot the ROC curve along with AUC
+roc_result <- roc(actual_classes, as.numeric(predicted_probabilities))
+plot(roc_result, main = "ROC Curve for Lasso Regression", col = "red")
+auc_value <- auc(roc_result)
+cat("Area under the ROC curve (AUC):", auc_value, "\n")
+
+```
+ 
+ Decision Tree
+```{r}
+
+library(rpart)
+library(caret)
+library(pROC)
+
+decision_tree_model <- rpart(Target ~ ., data = heart_train, method = "class")
+
+plot(decision_tree_model, uniform = TRUE, main = "Decision Tree for Heart Disease")
+text(decision_tree_model, use.n = TRUE, all = TRUE, cex = 0.8, vjust=-0.5)
+
+predicted_classes <- predict(decision_tree_model, newdata = heart_test, type = "class")
+
+conf_matrix <- confusionMatrix(predicted_classes, heart_test$Target)
+
+# Print the confusion matrix results
+print(conf_matrix)
+```
+
+
+```{r}
+predicted_probabilities <- predict(decision_tree_model, newdata = heart_test, type = "prob")[,2] 
+roc_result <- roc(heart_test$Target, predicted_probabilities)
+auc_value <- auc(roc_result)
+
+# Output AUC and plot ROC curve
+print(paste("AUC:", auc_value))
+plot(roc_result, main = "ROC Curve for Decision Tree", col = "red")
+
+# Output accuracy, precision, recall, and F1 score
+accuracy <- conf_matrix$overall['Accuracy']
+precision <- conf_matrix$byClass['Pos Pred Value']
+recall <- conf_matrix$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+
+```
+```{r}
+
+```
+
+
+
+bagging
+
+```{r}
+library(foreach)
+library(doParallel)
+
+registerDoParallel(cores = detectCores())
+
+models <- foreach(i = 1:100, .packages = 'rpart') %dopar% {
+  sample_indices <- sample(nrow(heart_train), replace = TRUE)
+  bootstrap_sample <- heart_train[sample_indices, ]
+  
+  fit <- rpart(Target ~ ., data = bootstrap_sample, method = "class",
+               control = rpart.control(maxdepth = 3, cp = 0.001)) 
+  return(fit)
+}
+
+stopImplicitCluster()
+
+
+```
+
+
+```{r}
+library(rpart.plot)
+
+last_model <- models[[length(models)]]
+
+rpart.plot(last_model)
+```
+
+```{r}
+# Predict using the first model and print predictions
+if (inherits(models[[1]], "rpart")) {
+  test_predictions <- predict(models[[1]], newdata = heart_test, type = "class")
+  print(head(test_predictions))
+} else {
+  print("Model 1 is not correctly set up.")
+}
+
+```
+
+```{r}
+predictions_matrix <- matrix(nrow = nrow(heart_test), ncol = 100)
+
+for (i in 1:100) {
+  predictions_matrix[, i] <- as.character(predict(models[[i]], newdata = heart_test, type = "class"))
+}
+
+majority_votes <- apply(predictions_matrix, 1, function(x) {
+  names(which.max(table(x)))
+})
+
+majority_votes <- factor(majority_votes, levels = c("0", "1"))
+
+conf_matrix <- confusionMatrix(majority_votes, heart_test$Target)
+print(conf_matrix)
+
+```
+
+
+
+```{r}
+# Set up parallel processing
+registerDoParallel(cores = detectCores())
+
+# Train your ensemble models
+large_models <- foreach(i = 1:100, .packages = 'rpart') %dopar% {
+  sample_indices <- sample(nrow(heart_train), replace = TRUE)
+  bootstrap_sample <- heart_train[sample_indices, ]
+  
+  fit <- rpart(Target ~ ., data = bootstrap_sample, method = "class",
+               control = rpart.control(maxdepth = 30, cp = 0.001)) 
+  return(fit)
+}
+
+# Stop parallel processing
+stopImplicitCluster()
+```
+
+```{r}
+library(rpart.plot)
+last_large_model <- large_models[[length(large_models)]]
+
+
+rpart.plot(last_large_model)
+```
+
+
+```{r}
+
+predictions_matrix <- matrix(nrow = nrow(heart_test), ncol = 100)
+
+for (i in 1:100) {
+  predictions_matrix[, i] <- as.character(predict(large_models[[i]], newdata = heart_test, type = "class"))
+}
+
+majority_votes <- apply(predictions_matrix, 1, function(x) {
+  names(which.max(table(x)))
+})
+
+large_majority_votes <- factor(majority_votes, levels = c("0", "1"))
+
+# Evaluate performance
+conf_matrix <- confusionMatrix(large_majority_votes, heart_test$Target)
+print(conf_matrix)
+
+
+```
+Random Forest
+
+```{r}
+
+library(randomForest)
+library(caret)
+library(dplyr)
+
+heart_train$Target <- as.factor(heart_train$Target)
+heart_test$Target <- as.factor(heart_test$Target)
+
+
+rf <- randomForest(
+   Target ~ ., # Response and predictors formula
+   data = heart_train,
+   ntree = 100, # Number of trees
+   importance = TRUE, # Measure variable importance
+   mtry = sqrt(ncol(heart_train) ))# Number of variables randomly sampled
+
+
+# Step 5: Make predictions on the test set
+y_pred <- predict(rf, newdata = heart_test)
+
+
+# Confusion Matrix
+confusionMatrix(y_pred, heart_test$Target)
+
+# Feature Importance
+importance(rf)
+
+```
+
+
+XGB
+```{r include=FALSE}
+library(caret)
+library(xgboost)
+library(dplyr)
+ctrl <- trainControl(method = "cv",       
+                     number = 5,          
+                     verboseIter = TRUE,  
+                     savePredictions = "final", 
+                     allowParallel = TRUE,
+                     classProbs = TRUE) 
+
+grid<- expand.grid(max_depth = c(1, 3, 5),
+                    nrounds = c(500, 1000, 1500, 2000, 2500, 3000),
+                    eta = c(0.05, 0.01, 0.005),
+                    min_child_weight = 10,
+                    subsample = 0.7,
+                    gamma = 0,
+                    colsample_bytree = 1)
+levels(heart_train$Target) <- c("Absence", "Presence")
+levels(heart_test$Target) <- c("Absence", "Presence")
+heart_train$Target <- as.factor(heart_train$Target)
+heart_test$Target <- as.factor(heart_test$Target)
+
+xgb <- train(Target ~.,
+             data = heart_train,
+             method = "xgbTree",
+             trControl = ctrl,
+             tuneGrid = grid,
+             metric = "Accuracy")
+plot(xgb)
+```
+
+```{r}
+xgb_predictions <- predict(xgb, newdata = heart_test)
+```
+
+```{r}
+library(pROC)
+test_predictions <- predict(xgb, newdata = heart_test)
+confusionMatrix(test_predictions, heart_test$Target)
+
+
+# Confusion Matrix
+cm <- confusionMatrix(test_predictions, heart_test$Target)
+
+# Extract Precision, Recall, and F1 score
+precision <- cm$byClass['Pos Pred Value']
+recall <- cm$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+# Print Metrics
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+
+```
+
+
+
+KNN 
+
+```{r}
+
+library(caret)
+library(dplyr)
+
+heart_train$Target <- as.factor(heart_train$Target)
+heart_test$Target <- as.factor(heart_test$Target)
+
+
+# Step 4: Train the KNN model
+ctrl2 <- trainControl(
+   method = "cv", # Cross-validation method
+   number = 10, # 10-fold cross-validation
+   classProbs = TRUE, # Compute class probabilities
+   summaryFunction = twoClassSummary # For ROC and other metrics
+)
+
+knn <- train(
+   Target ~ ., 
+   data = heart_train, 
+   method = "knn",
+   trControl = ctrl2,
+   metric = "ROC"
+)
+
+# Step 5: Make predictions on the test set
+y_pred <- predict(knn, newdata = heart_test)
+
+# Step 6: Evaluate the model
+# Confusion Matrix
+cm <- confusionMatrix(y_pred, heart_test$Target)
+
+# Extract Metrics
+accuracy <- cm$overall['Accuracy']
+precision <- cm$byClass['Pos Pred Value']
+recall <- cm$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+# Print the metrics
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+cm
+```
+Knn new
+```{r}
+ctrl <- trainControl(
+   method = "cv", # 10-fold cross-validation
+   number = 10,
+   classProbs = TRUE,
+   summaryFunction = twoClassSummary
+)
+
+# Tuning k parameter for KNN model
+k_grid <- expand.grid(k = c(3, 5, 7, 9, 11))
+
+knn <- train(
+   Target ~ ., 
+   data = heart_train, 
+   method = "knn",
+   trControl = ctrl,
+   metric = "ROC",
+   tuneGrid = k_grid
+)
+y_pred <- predict(knn, newdata = heart_test)
+
+cm <- confusionMatrix(y_pred, heart_test$Target)
+
+accuracy <- cm$overall['Accuracy']
+precision <- cm$byClass['Pos Pred Value']
+recall <- cm$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+
+```
+
+
+Super leaner
+
+
+```{r}
+# Step 2: Load necessary libraries
+library(SuperLearner)
+library(caret)
+library(glmnet)
+library(randomForest)
+
+# Create X and y objects
+X_train <- heart_train[, -which(names(heart_train) == "Target")]
+y_train <- as.numeric(heart_train$Target) - 1  # Binary conversion
+
+X_test <- heart_test[, -which(names(heart_test) == "Target")]
+
+# Step 4: Define individual learners
+learners <- c("SL.mean", "SL.glmnet", "SL.ranger")
+
+# Step 5: Train the Super Learner ensemble
+sl_model <- SuperLearner(
+   Y = y_train, 
+   X = X_train, 
+   family = binomial(), 
+   SL.library = learners,
+   method = "method.NNLS", # Non-negative least squares
+   cvControl = list(V = 5)
+)
+
+# Output directly
+print(sl_model)
+
+# Step 6: Nested CV for performance
+cv_sl <- CV.SuperLearner(Y = y_train, X = X_train, family = binomial(), V = 5, SL.library = learners)
+
+# Output nested CV
+summary(cv_sl)
+
+# Step 7: Visualize nested CV results
+plot(cv_sl)
+
+# Step 8: Evaluate directly
+y_pred <- predict(sl_model, newdata = X_test)
+
+# Convert to binary classes
+y_pred_class <- ifelse(y_pred$pred > 0.5, "Presence", "Absence")
+y_pred_class <- factor(y_pred_class, levels = c("Absence", "Presence"))
+
+# Confusion Matrix
+cm <- confusionMatrix(y_pred_class, heart_test$Target)
+
+# Extract and print directly
+accuracy <- cm$overall['Accuracy']
+precision <- cm$byClass['Pos Pred Value']
+recall <- cm$byClass['Sensitivity']
+F1 <- 2 * (precision * recall) / (precision + recall)
+
+cat("Accuracy:", accuracy, "\n")
+cat("Precision:", precision, "\n")
+cat("Recall:", recall, "\n")
+cat("F1 Score:", F1, "\n")
+```
+
+
+
+
+
+
+Univariate analysis
+
+```{r}
+library(ggplot2)
+
+# Histograms for numerical variables
+hist_age <- ggplot(heart_data, aes(x = Age)) + geom_histogram(fill = "skyblue", color = "black") + labs(x = "Age", y = "Frequency")
+hist_resting_bp <- ggplot(heart_data, aes(x = Resting_BP)) + geom_histogram(fill = "skyblue", color = "black") + labs(x = "Resting Blood Pressure", y = "Frequency")
+hist_cholesterol <- ggplot(heart_data, aes(x = Cholesterol)) + geom_histogram(fill = "skyblue", color = "black") + labs(x = "Cholesterol", y = "Frequency")
+hist_max_hr <- ggplot(heart_data, aes(x = Max_Heart_Rate)) + geom_histogram(fill = "skyblue", color = "black") + labs(x = "Max Heart Rate", y = "Frequency")
+library(gridExtra)
+
+# Combine histograms
+combined_hist <- grid.arrange(hist_age, hist_resting_bp, hist_cholesterol, hist_max_hr, nrow = 2)
+
+# Display combined plot
+print(combined_hist)
+
+```
+
+
+```{r}
+# Bar plots for categorical variables
+bar_sex <- ggplot(heart_data, aes(x = factor(Sex), fill = factor(Sex))) + geom_bar() + labs(x = "Sex", y = "Count")
+bar_cp <- ggplot(heart_data, aes(x = factor(Chest_Pain_Type), fill = factor(Chest_Pain_Type))) + geom_bar() + labs(x = "Chest Pain ", y = "Count")
+bar_fbs <- ggplot(heart_data, aes(x = factor(Fasting_Blood_Sugar), fill = factor(Fasting_Blood_Sugar))) + geom_bar() + labs(x = "Blood Sugar", y = "Count")
+bar_ecg <- ggplot(heart_data, aes(x = factor(Resting_ECG), fill = factor(Resting_ECG))) + geom_bar() + labs(x = "ECG", y = "Count")
+bar_eia <- ggplot(heart_data, aes(x = factor(Exercise_Induced_Angina), fill = factor(Exercise_Induced_Angina))) + geom_bar() + labs(x = "Angina", y = "Count")
+bar_st_slope <- ggplot(heart_data, aes(x = factor(ST_Slope), fill = factor(ST_Slope))) + geom_bar() + labs(x = "ST Slope", y = "Count")
+bar_num_vessels <- ggplot(heart_data, aes(x = factor(Num_Major_Vessels), fill = factor(Num_Major_Vessels))) + geom_bar() + labs(x = " Vessels", y = "Count")
+bar_thalassemia <- ggplot(heart_data, aes(x = factor(Thalassemia), fill = factor(Thalassemia))) + geom_bar() + labs(x = "Thalassemia", y = "Count")
+
+# Combine bar plots
+combined_bar <- grid.arrange(bar_sex, bar_cp, bar_fbs, bar_ecg, bar_eia, bar_st_slope, bar_num_vessels, bar_thalassemia, nrow = 4)
+
+# Display combined plot
+print(combined_bar)
+
+
+```
+
+
+
+
+
+
+
+
